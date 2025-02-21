@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+if "OPENAI_API_KEY" in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -19,9 +21,6 @@ from translate_script import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 st.set_page_config(page_title="LegalTransUA", layout="wide")
-
-if "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 TEMP_DIR = "temp"
 if not os.path.exists(TEMP_DIR):
