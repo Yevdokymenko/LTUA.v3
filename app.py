@@ -58,7 +58,7 @@ def save_uploaded_file(uploaded_file):
     return file_path
 
 if section == "Головна сторінка":
-    st.title("LegalTransUA (Google + OpenAI GPT з chunk=5)")
+    st.title("LegalTransUA (Google + OpenAI)")
     st.header("Переклад документів (DOCX, PDF, URL)")
 
     type_of_source = st.radio("Оберіть тип джерела:", ["Файл", "URL"])
