@@ -1,7 +1,13 @@
 import streamlit as st
 import os
+
+# Спочатку зчитаємо секрети і виставляємо openai.api_key
 if "OPENAI_API_KEY" in st.secrets:
     os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+
+import openai
+openai.api_key = os.environ.get("OPENAI_API_KEY", None)
+
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
