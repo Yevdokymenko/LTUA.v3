@@ -1,5 +1,10 @@
 import streamlit as st
 import os
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from docx import Document
+import re
 
 # Спочатку зчитаємо секрети і виставляємо openai.api_key
 if "OPENAI_API_KEY" in st.secrets:
@@ -8,12 +13,7 @@ if "OPENAI_API_KEY" in st.secrets:
 import openai
 openai.api_key = os.environ.get("OPENAI_API_KEY", None)
 
-import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-from docx import Document
-import re
-
+# Тепер імпортуємо translate_script
 from translate_script import (
     extract_text,
     translate_text_google,
@@ -32,12 +32,21 @@ TEMP_DIR = "temp"
 if not os.path.exists(TEMP_DIR):
     os.makedirs(TEMP_DIR)
 
+
 def sanitize_filename(filename: str) -> str:
-    """
-    Очищає ім'я файлу від недопустимих символів.
-    """
+    """Очищає ім'я файлу від недопустимих символів."""
     name, ext = os.path.splitext(filename)
     return re.sub(r'[<>:"/\\|?*]', '_', name) + ext
+
+
+st.image("https://i.imgur.com/JmLIg6y.jpeg", use_container_width=True)
+
+# Меню
+st.sidebar.title("Меню навігації")
+section = st.sidebar.radio(
+    "Перейдіть до розділу:",
+    ["Головна сторінка", "Про додаток", "Корисні посилання", "Допомога Україні", "Контакти"]
+)
 
 def save_uploaded_file(uploaded_file):
     """
@@ -48,42 +57,15 @@ def save_uploaded_file(uploaded_file):
         f.write(uploaded_file.getbuffer())
     return file_path
 
-# Базовий CSS (за бажанням можна розширити)
-st.markdown(
-    """
-    <style>
-    body {
-        background-color: #f8f4e7;
-    }
-    [data-testid="stAppViewContainer"] {
-        background-color: #f8f4e7;
-        color: black;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-st.image("https://i.imgur.com/JmLIg6y.jpeg", use_container_width=True)
-
-# Меню навігації
-st.sidebar.title("Меню навігації")
-section = st.sidebar.radio(
-    "Перейдіть до розділу:",
-    ["Головна сторінка", "Про додаток", "Корисні посилання", "Допомога Україні", "Контакти"]
-)
-
 if section == "Головна сторінка":
-    st.title("LegalTransUA (Google + OpenAI)")
-    st.header("Переклад документів")
-    st.write("Завантажте файл (DOCX або PDF) або введіть URL для перекладу.")
+    st.title("LegalTransUA (Google + OpenAI GPT з chunk=5)")
+    st.header("Переклад документів (DOCX, PDF, URL)")
 
     type_of_source = st.radio("Оберіть тип джерела:", ["Файл", "URL"])
-
-    # chunk_size фіксуємо на 5
-    chunk_size = 5
+    chunk_size = 5  # фіксовано
 
     if type_of_source == "Файл":
-        uploaded_file = st.file_uploader("Завантажте файл (DOCX або PDF):", type=["docx", "pdf"])
+        uploaded_file = st.file_uploader("Завантажте файл (DOCX або PDF):", type=["docx","pdf"])
         if uploaded_file:
             file_path = save_uploaded_file(uploaded_file)
             st.success(f"Файл '{uploaded_file.name}' успішно завантажено.")
@@ -95,12 +77,12 @@ if section == "Головна сторінка":
                 else:
                     st.info(f"Знайдено {len(paragraphs)} абзаців.")
 
-                    # ---------- Google переклад (покабульно) ----------
-                    google_progress = st.progress(0, text="Google Translate: 0%")
+                    # Google переклад (кожен абзац окремо)
+                    google_progress = st.progress(0, text="Google: 0%")
                     google_trans = ["" for _ in paragraphs]
 
                     with ThreadPoolExecutor(max_workers=5) as executor:
-                        futures_g = {executor.submit(translate_text_google, p): i for i, p in enumerate(paragraphs)}
+                        futures_g = {executor.submit(translate_text_google, p): i for i,p in enumerate(paragraphs)}
                         done_g = 0
                         for future in as_completed(futures_g):
                             idx = futures_g[future]
@@ -109,33 +91,32 @@ if section == "Головна сторінка":
                             frac_g = done_g / len(paragraphs)
                             google_progress.progress(frac_g, text=f"Google: {int(frac_g*100)}%")
 
-                    # ---------- OpenAI переклад (chunk=5) ----------
+                    # OpenAI GPT (chunk=5)
                     openai_progress = st.progress(0, text="OpenAI GPT: 0%")
-                    openai_trans = [None] * len(paragraphs)
+                    openai_trans = ["" for _ in paragraphs]
 
                     all_chunks = list(chunk_paragraphs(paragraphs, chunk_size=chunk_size))
                     total_chunks = len(all_chunks)
                     done_c = 0
-
-                    for chunk_i, chunk in enumerate(all_chunks):
-                        chunk_result = translate_chunk_openai(chunk)
-                        chunk_start = chunk_i * chunk_size
-                        for j, translation in enumerate(chunk_result):
-                            openai_trans[chunk_start + j] = translation
-
+                    for c_i, chunk in enumerate(all_chunks):
+                        chunk_res = translate_chunk_openai(chunk)
+                        # запишемо в openai_trans
+                        start_idx = c_i*chunk_size
+                        for j, val in enumerate(chunk_res):
+                            openai_trans[start_idx + j] = val
                         done_c += 1
                         frac_o = done_c / total_chunks
                         openai_progress.progress(frac_o, text=f"OpenAI GPT: {int(frac_o*100)}%")
 
-                    # ---------- Збереження результатів у DOCX ----------
+                    # Збережемо DOCX
                     doc = Document()
                     setup_document_orientation(doc)
                     add_title(doc)
                     doc.add_paragraph(f"Дата та час перекладу: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
                     create_translation_table(doc, paragraphs, google_trans, openai_trans)
 
-                    # Формуємо ім'я вихідного файлу
-                    # Наприклад: "MyFile (Translated by LTUA 2025-02-21).docx"
+                    # Формуємо ім'я файлу: "MyFile (Translated by LTUA YYYY-MM-DD).docx"
                     timestamp_str = datetime.now().strftime("%Y-%m-%d")
                     base_name = os.path.splitext(uploaded_file.name)[0]
                     base_name = sanitize_filename(base_name)
@@ -167,12 +148,12 @@ if section == "Головна сторінка":
             else:
                 st.success(f"Знайдено {len(paragraphs)} абзаців.")
 
-                # ---------- Google (кожен абзац) ----------
+                # Google
                 google_progress = st.progress(0, text="Google: 0%")
                 google_trans = ["" for _ in paragraphs]
 
                 with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures_g = {executor.submit(translate_text_google, p): i for i, p in enumerate(paragraphs)}
+                    futures_g = {executor.submit(translate_text_google, p): i for i,p in enumerate(paragraphs)}
                     done_g = 0
                     for future in as_completed(futures_g):
                         idx = futures_g[future]
@@ -181,25 +162,23 @@ if section == "Головна сторінка":
                         frac_g = done_g / len(paragraphs)
                         google_progress.progress(frac_g, text=f"Google: {int(frac_g*100)}%")
 
-                # ---------- OpenAI (chunk=5) ----------
+                # OpenAI GPT (chunk=5)
                 openai_progress = st.progress(0, text="OpenAI GPT: 0%")
-                openai_trans = [None] * len(paragraphs)
+                openai_trans = ["" for _ in paragraphs]
 
                 all_chunks = list(chunk_paragraphs(paragraphs, chunk_size=chunk_size))
                 total_chunks = len(all_chunks)
                 done_c = 0
-
-                for chunk_i, chunk in enumerate(all_chunks):
-                    chunk_result = translate_chunk_openai(chunk)
-                    chunk_start = chunk_i * chunk_size
-                    for j, translation in enumerate(chunk_result):
-                        openai_trans[chunk_start + j] = translation
-
+                for c_i, chunk in enumerate(all_chunks):
+                    chunk_res = translate_chunk_openai(chunk)
+                    start_idx = c_i*chunk_size
+                    for j, val in enumerate(chunk_res):
+                        openai_trans[start_idx + j] = val
                     done_c += 1
                     frac_o = done_c / total_chunks
                     openai_progress.progress(frac_o, text=f"OpenAI GPT: {int(frac_o*100)}%")
 
-                # Збереження у DOCX
+                # Формуємо DOCX
                 doc = Document()
                 setup_document_orientation(doc)
                 add_title(doc)
@@ -224,7 +203,7 @@ elif section == "Про додаток":
     st.title("Про LegalTransUA")
     st.write("""
     **LegalTransUA** — інноваційний застосунок для перекладу юридичних документів.
-    Підтримує переклад з англійської на українську, роботу з файлами DOCX та PDF,
+    Підтримує переклад із англійської на українську, роботу з DOCX, PDF та URL,
     а також Google Translate і OpenAI GPT (chunk=5).
     """)
 
