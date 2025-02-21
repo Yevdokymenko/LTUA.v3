@@ -23,10 +23,6 @@ from deep_translator import GoogleTranslator
 import openai
 from dotenv import load_dotenv
 
-# Завантажуємо ключ OpenAI з .env (або key.env)
-load_dotenv(dotenv_path="key.env")
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
