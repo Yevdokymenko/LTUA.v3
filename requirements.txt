@@ -1,0 +1,9 @@
+streamlit
+requests
+beautifulsoup4
+python-docx
+pymupdf
+tqdm
+deep-translator
+openai
+python-dotenv
