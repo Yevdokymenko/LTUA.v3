@@ -65,7 +65,7 @@ section = st.sidebar.radio(
 )
 
 if section == "Головна сторінка":
-    st.title("LegalTransUA (Google + OpenAI з Chunk=5)")
+    st.title("LegalTransUA (Google + OpenAI)")
     st.header("Переклад документів")
     st.write("Завантажте файл (DOCX або PDF) або введіть URL для перекладу.")
 
