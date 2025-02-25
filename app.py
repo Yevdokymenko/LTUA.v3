@@ -82,14 +82,16 @@ if section == "Головна сторінка":
                     google_trans = ["" for _ in paragraphs]
 
                     with ThreadPoolExecutor(max_workers=5) as executor:
-                        futures_g = {executor.submit(translate_text_google, p): i for i,p in enumerate(paragraphs)}
-                        done_g = 0
-                        for future in as_completed(futures_g):
-                            idx = futures_g[future]
-                            google_trans[idx] = future.result()
-                            done_g += 1
-                            frac_g = done_g / len(paragraphs)
-                            google_progress.progress(frac_g, text=f"Google: {int(frac_g*100)}%")
+                        # Створюємо список, а не словник
+                        futures_g = [executor.submit(translate_text_google, p) for p in paragraphs]
+
+                    done_g = 0
+                    for i, fut in enumerate(futures_g):
+                        # Забираємо результат у тому ж порядку
+                        google_trans[i] = fut.result()
+                        done_g += 1
+                        frac_g = done_g / len(paragraphs)
+                        google_progress.progress(frac_g, text=f"Google: {int(frac_g*100)}%")
 
                     # OpenAI GPT (chunk=5)
                     openai_progress = st.progress(0, text="OpenAI GPT: 0%")
