@@ -1,0 +1,15 @@
+[theme]
+# Основний колір для кнопок, слайдерів, тощо
+primaryColor="#0057b7"
+
+# Колір фону основного вікна
+backgroundColor="#FFFFFF"
+
+# Колір фону бічної панелі та інших елементів
+secondaryBackgroundColor="#F0F2F6"
+
+# Основний колір тексту
+textColor="#1a1a1a"
+
+# Колір шрифту
+font="sans serif"
