@@ -5,5 +5,5 @@ python-docx
 pymupdf
 tqdm
 deep-translator
-openai==0.28.0
+openai>=1.3.0
 python-dotenv
