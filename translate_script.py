@@ -21,13 +21,17 @@ from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
 
 import openai
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
+import streamlit as st  # <--- ДОДАЄМО ЦЕЙ ІМПОРТ, ЩОБ ЧИТАТИ КЛЮЧІ
 
 # Завантажуємо змінні середовища з файлу key.env
-load_dotenv(dotenv_path="key.env")
+# load_dotenv(dotenv_path="key.env")
 
 # Ініціалізуємо клієнт OpenAI (новий підхід)
-client = openai.OpenAI()
+client = openai.OpenAI(
+    api_key=st.secrets["OPENAI_API_KEY"], 
+    base_url="https://openrouter.ai/api/v1"
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -113,9 +117,9 @@ def translate_chunk_openai(paragraph_chunk):
         prompt_text += f"{i}) {para}\n"
     
     # Використовуємо стабільну та потужну модель gpt-5-mini
-    model_to_use = "gpt-5-mini"
+    model_to_use = "openai/gpt-5-mini"
     
-    logging.info(f"--- ВІДПРАВКА ЗАПИТУ ДО OPENAI (ОСТАТОЧНА ВЕРСІЯ) ---")
+    logging.info(f"--- ВІДПРАВКА ЗАПИТУ ДО OPENROUTER (ОСТАТОЧНА ВЕРСІЯ) ---")
     logging.info(f"Модель: {model_to_use}")
 
     try:
@@ -133,7 +137,11 @@ def translate_chunk_openai(paragraph_chunk):
                 },
             ],
             # Параметр 'temperature' видалено, оскільки вся лінійка GPT-5 його не підтримує
-            max_completion_tokens=4000
+            extra_headers={
+                "HTTP-Referer": "https://legaltransua.streamlit.app/",
+                "X-Title": "LegalTransUA"
+            }
+            max_tokens=4000
         )
         result_text = response.choices[0].message.content.strip()
 
