@@ -21,19 +21,25 @@ from bs4 import BeautifulSoup
 from deep_translator import GoogleTranslator
 
 import openai
-# from dotenv import load_dotenv
-import streamlit as st  # <--- ДОДАЄМО ЦЕЙ ІМПОРТ, ЩОБ ЧИТАТИ КЛЮЧІ
+import streamlit as st
 
-# Завантажуємо змінні середовища з файлу key.env
-# load_dotenv(dotenv_path="key.env")
+# Налаштування логування
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Ініціалізуємо клієнт OpenAI (новий підхід)
+# --- ІНІЦІАЛІЗАЦІЯ КЛІЄНТА OPENROUTER ---
+# Використовуємо ключ із Secrets під назвою OPENAI_API_KEY, але стукаємо на адресу OpenRouter
+try:
+    api_key = st.secrets["OPENAI_API_KEY"]
+except Exception:
+    # Fallback для локального тестування, якщо st.secrets недоступні
+    api_key = os.getenv("OPENAI_API_KEY", "YOUR_KEY_HERE")
+
 client = openai.OpenAI(
-    api_key=st.secrets["OPENAI_API_KEY"], 
-    base_url="https://openrouter.ai/api/v1"
+    base_url="https://openrouter.ai/api/v1",
+    api_key=api_key
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# --- ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ ТЕКСТУ ---
 
 def extract_text_from_docx(file_path: str):
     """Витягує текст із DOCX-файлу, повертає список абзаців."""
@@ -93,7 +99,8 @@ def translate_text_google(text: str, max_retries=3) -> str:
     return "Помилка перекладу (Google)"
 
 
-# -------------------- OPENAI CHUNKING LOGIC --------------------
+# -------------------- OPENAI LOGIC --------------------
+
 def chunk_paragraphs(paragraphs, chunk_size=5):
     """
     Розбиває список абзаців на шматки (chunk) по chunk_size.
@@ -103,11 +110,9 @@ def chunk_paragraphs(paragraphs, chunk_size=5):
         yield paragraphs[i : i+chunk_size]
 
 
-
 def translate_chunk_openai(paragraph_chunk):
     """
-    Викликає OpenAI для кількох абзаців за раз (шматок), використовуючи новий API.
-    Остаточна версія, сумісна з моделями GPT-5.
+    Викликає OpenAI (через OpenRouter) для кількох абзаців за раз.
     """
     if not paragraph_chunk:
         return []
@@ -116,14 +121,13 @@ def translate_chunk_openai(paragraph_chunk):
     for i, para in enumerate(paragraph_chunk, start=1):
         prompt_text += f"{i}) {para}\n"
     
-    # Використовуємо стабільну та потужну модель gpt-5-mini
+    # Використовуємо модель OpenRouter (з префіксом виробника)
     model_to_use = "openai/gpt-5-mini"
     
-    logging.info(f"--- ВІДПРАВКА ЗАПИТУ ДО OPENROUTER (ОСТАТОЧНА ВЕРСІЯ) ---")
+    logging.info(f"--- ВІДПРАВКА ЗАПИТУ ДО OPENROUTER ---")
     logging.info(f"Модель: {model_to_use}")
 
     try:
-        # --- ОСТАТОЧНА ВЕРСІЯ: модель gpt-5-mini БЕЗ параметра 'temperature' ---
         response = client.chat.completions.create(
             model=model_to_use,
             messages=[
@@ -136,27 +140,23 @@ def translate_chunk_openai(paragraph_chunk):
                     "content": prompt_text
                 },
             ],
-            # Параметр 'temperature' видалено, оскільки вся лінійка GPT-5 його не підтримує
             extra_headers={
                 "HTTP-Referer": "https://legaltransua.streamlit.app/",
                 "X-Title": "LegalTransUA"
             }
-            max_tokens=4000
         )
         result_text = response.choices[0].message.content.strip()
 
-        logging.info(f"--- ОТРИМАНО УСПІШНУ ВІДПОВІДЬ ВІД OPENAI ---")
+        logging.info(f"--- ОТРИМАНО УСПІШНУ ВІДПОВІДЬ ВІД OPENROUTER ---")
         if not result_text:
-            logging.warning("!!! Відповідь від OpenAI ПОРОЖНЯ !!!")
-        else:
-            logging.info(f"Сирий текст відповіді збережено для аналізу.")
+            logging.warning("!!! Відповідь ПОРОЖНЯ !!!")
 
     except Exception as e:
-        logging.error(f"!!! ВИНАСЛІДОК ЗАПИТУ ДО OPENAI ВИНИКЛА ПОМИЛКА !!!")
+        logging.error(f"!!! ПОМИЛКА ЗАПИТУ ДО OPENROUTER !!!")
         logging.error(f"Повний текст помилки: {e}")
-        return ["Помилка перекладу (OpenAI)"] * len(paragraph_chunk)
+        return ["Помилка перекладу (AI)"] * len(paragraph_chunk)
 
-    # Подальша логіка обробки відповіді
+    # Парсинг відповіді
     lines = result_text.splitlines()
     chunk_result = []
     current_translation = ""
@@ -188,11 +188,12 @@ def translate_chunk_openai(paragraph_chunk):
         chunk_result.append("Помилка: не вдалося розпарсити відповідь GPT")
 
     return chunk_result[: len(paragraph_chunk)]
-# --------------------------------------------------------------
 
+
+# -------------------- DOCX FORMATTING --------------------
 
 def setup_document_orientation(doc: Document):
-    """Налаштовує горизонтальну орієнтацію документа, тощо."""
+    """Налаштовує горизонтальну орієнтацію документа."""
     section = doc.sections[-1]
     section.orientation = WD_ORIENT.LANDSCAPE
     section.page_width, section.page_height = section.page_height, section.page_width
@@ -221,61 +222,45 @@ def create_shading_element(color: str):
 
 
 def create_translation_table(doc: Document, paragraphs, google_trans, openai_trans):
-    """
-    Створює таблицю з 4-ма колонками:
-      №, Оригінальний текст, Google Translate, OpenAI GPT.
-    """
+    """Створює таблицю порівняння."""
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
 
     headers = ["№", "Оригінальний текст", "Google Translate", "OpenAI GPT"]
-    header_fill_color = "D9EAF7"  # Колір фону заголовка
-    row_number_fill_color = "E0E0E0"  # Колір фону для колонки з номером
+    header_fill_color = "D9EAF7"
+    row_number_fill_color = "E0E0E0"
 
-    # Створюємо заголовний рядок
+    # Заголовки
     for idx, header in enumerate(headers):
         cell = table.rows[0].cells[idx]
         cell.text = header
         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         cell.paragraphs[0].runs[0].font.bold = True
-        # Заливка фону комірки
         cell._element.get_or_add_tcPr().append(create_shading_element(header_fill_color))
 
-    # Заповнюємо таблицю даними
+    # Рядки
     for i, (para, g, o) in enumerate(zip(paragraphs, google_trans, openai_trans)):
         row_cells = table.add_row().cells
         row_cells[0].text = str(i + 1)
         row_cells[1].text = para
         row_cells[2].text = g
-        row_cells[3].text = o
+        row_cells[3].text = str(o) if o else ""
 
-        # Заливка фону для колонки з номером
         row_cells[0]._element.get_or_add_tcPr().append(create_shading_element(row_number_fill_color))
 
-        # Вирівнювання та розмір шрифту
         for cell in row_cells:
             for paragraph in cell.paragraphs:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 for run in paragraph.runs:
                     run.font.size = Pt(9)
 
-    # Далі встановлюємо ширину колонок.
-    # total_width - загальна ширина всієї таблиці (10 дюймів = ~25.4 см)
+    # Ширина колонок
     total_width = Inches(10)
+    first_col_width = total_width * 0.05
+    other_width = (total_width - first_col_width) / 3.0
 
-    # Перша колонка буде вузькою (наприклад, 5% від загальної ширини),
-    # а решта 3 колонки ділять залишок порівну.
-    first_col_width = total_width * 0.05  # 5% на колонку з №
-    other_width = (total_width - first_col_width) / 3.0  # решту ділимо на 3
+    col_widths = [first_col_width, other_width, other_width, other_width]
 
-    col_widths = [
-        first_col_width,  # №
-        other_width,      # Оригінальний текст
-        other_width,      # Google Translate
-        other_width       # OpenAI GPT
-    ]
-
-    # Застосовуємо встановлені ширини до всіх рядків таблиці
     for i, column in enumerate(table.columns):
         for cell in column.cells:
             cell.width = col_widths[i]
@@ -284,30 +269,23 @@ def create_translation_table(doc: Document, paragraphs, google_trans, openai_tra
 
 
 def save_translation_document(source, paragraphs, google_trans, openai_trans):
-    """Створює та зберігає DOCX із перекладами."""
+    """Зберігає документ."""
     doc = Document()
     setup_document_orientation(doc)
     add_title(doc)
-    # Додаємо рядок з датою/часом перекладу
     doc.add_paragraph(f"Дата та час перекладу: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     create_translation_table(doc, paragraphs, google_trans, openai_trans)
 
-    # ----- Формуємо ім'я файлу -----
     timestamp_str = datetime.now().strftime("%Y-%m-%d")
     if source.startswith("http"):
-        # Якщо це URL
         base_name = "Document From Internet"
     else:
-        # Якщо це локальний файл
-        # Витягаємо "чисту" назву файлу
         base_name = os.path.splitext(os.path.basename(source))[0]
         base_name = sanitize_filename(base_name)
 
-    # Приклад формату: "MyFile (Translated by LTUA 2025-02-21).docx"
     output_filename = f"{base_name} (Translated by LTUA {timestamp_str}).docx"
 
-    # Зберігаємо у папці "output"
     save_dir = "output"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -320,12 +298,7 @@ def save_translation_document(source, paragraphs, google_trans, openai_trans):
 
 
 def process_document(source: str, openai_chunk_size=5):
-    """
-    1) Витягає абзаци
-    2) Перекладає Google (покабульно, в потоках)
-    3) Перекладає OpenAI (пакетно, chunk)
-    4) Зберігає DOCX
-    """
+    """Основна логіка обробки."""
     paragraphs = extract_text(source)
     if not paragraphs:
         logging.error("Документ не містить тексту або текст не вдалося витягти.")
@@ -333,7 +306,7 @@ def process_document(source: str, openai_chunk_size=5):
 
     logging.info(f"Знайдено абзаців: {len(paragraphs)}")
 
-    # GOOGLE: виконуємо паралельний переклад (кожен абзац — запит)
+    # GOOGLE
     google_translations = [""] * len(paragraphs)
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(translate_text_google, p): i for i, p in enumerate(paragraphs)}
@@ -341,28 +314,24 @@ def process_document(source: str, openai_chunk_size=5):
             idx = futures[future]
             google_translations[idx] = future.result()
 
-    # OPENAI: chunk-імо (менше звернень, швидше)
+    # OPENAI (OpenRouter)
     openai_translations = [""] * len(paragraphs)
-
     all_chunks = list(chunk_paragraphs(paragraphs, chunk_size=openai_chunk_size))
-    # Припустимо, робимо ОДНОПОТОЧНО, щоб уникнути rate-limit
-    # Якщо хочемо паралель, можна теж додати ThreadPoolExecutor, але обережно з rate-limit
+    
     processed_count = 0
     total_paras = len(paragraphs)
 
     for chunk_index, chunk in enumerate(all_chunks):
-        # Переклад для цього chunk
         chunk_result = translate_chunk_openai(chunk)
-        # chunk_result — список перекладів, довжиною як chunk
-        # Визначимо, куди це вставити в openai_translations:
+        
         start_idx = chunk_index * openai_chunk_size
         for i, translation in enumerate(chunk_result):
-            openai_translations[start_idx + i] = translation
+            if start_idx + i < len(openai_translations):
+                openai_translations[start_idx + i] = translation
 
         processed_count += len(chunk)
-        logging.info(f"OpenAI chunk {chunk_index+1}/{len(all_chunks)} готово. (всього {processed_count}/{total_paras} абзаців)")
+        logging.info(f"OpenAI chunk {chunk_index+1}/{len(all_chunks)} готово.")
 
-    # Зберігаємо у DOCX
     output_file = save_translation_document(
         source,
         paragraphs,
@@ -374,5 +343,6 @@ def process_document(source: str, openai_chunk_size=5):
 
 
 if __name__ == "__main__":
+    # Для локального тестування
     source_path = input("Введіть URL або шлях до PDF/DOCX-файлу: ").strip()
     process_document(source_path, openai_chunk_size=5)
