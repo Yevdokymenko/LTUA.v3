@@ -242,8 +242,10 @@ def create_translation_table(doc: Document, paragraphs, google_trans, openai_tra
     for i, (para, g, o) in enumerate(zip(paragraphs, google_trans, openai_trans)):
         row_cells = table.add_row().cells
         row_cells[0].text = str(i + 1)
-        row_cells[1].text = para
-        row_cells[2].text = g
+        
+        # БЕЗПЕЧНИЙ ЗАПИС: якщо перекладу немає, ставимо порожній рядок
+        row_cells[1].text = str(para) if para else ""
+        row_cells[2].text = str(g) if g else "" 
         row_cells[3].text = str(o) if o else ""
 
         row_cells[0]._element.get_or_add_tcPr().append(create_shading_element(row_number_fill_color))
